@@ -19,20 +19,23 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+          cache: gradle
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+      - name: Install SDK packages
+        run: |
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
       - name: Grant execute
         run: chmod +x gradlew
       - name: Unit tests
-        run: ./gradlew testDebugUnitTest --stacktrace
+        run: ./gradlew testDebugUnitTest --stacktrace --no-daemon
       - name: Assemble release APK
-        run: ./gradlew assembleRelease --stacktrace
+        run: ./gradlew assembleRelease --stacktrace --no-daemon
       - name: Verify APK
         run: |
           APK=$(find app/build/outputs/apk -name "*.apk" | head -n 1)
           test -n "$APK"
           test -s "$APK"
-          echo "APK=$APK" >> "$GITHUB_ENV"
           ls -lh "$APK"
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
