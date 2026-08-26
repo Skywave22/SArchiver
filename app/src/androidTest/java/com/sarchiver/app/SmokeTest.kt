@@ -11,6 +11,6 @@ class SmokeTest {
     @Test
     fun packageName() {
         val ctx = InstrumentationRegistry.getInstrumentation().targetContext
-        assertEquals("com.sarchiver.app.debug", ctx.packageName)
+        assertEquals("com.SSarchiver.debug", ctx.packageName)
     }
 }

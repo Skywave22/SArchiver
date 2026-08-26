@@ -2,6 +2,8 @@
 
 Production Android file manager, archive utility, USB OTG browser, and MTP client.
 
+Application id: `com.SSarchiver` (installs beside any older `com.sarchiver.app` build).
+
 Light-green Material 3 UI. Kotlin, Jetpack Compose, coroutines.
 
 ## Features that actually run
