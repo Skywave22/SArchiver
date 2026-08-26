@@ -82,9 +82,10 @@ object ArchiveEngine {
         destDir.mkdirs()
         when (detect(archive)) {
             ArchiveFormat.ZIP -> {
-                val zb = ZipFile.builder().setFile(archive).setUseUnicodeExtraFields(true)
-                if (password != null) zb.setPassword(password)
-                zb.get().use { z ->
+                if (password != null) {
+                    error("Password-protected ZIP extract is not supported by this ZipFile build; use 7z")
+                }
+                ZipFile.builder().setFile(archive).setUseUnicodeExtraFields(true).get().use { z ->
                 z.entries.toList().forEach { e ->
                     val target = PathSecurity.resolveSafe(destDir, e.name)
                     if (e.isDirectory) target.mkdirs()
