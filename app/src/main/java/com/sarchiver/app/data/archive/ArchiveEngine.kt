@@ -12,6 +12,7 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
 import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
 import org.apache.commons.compress.archivers.zip.ZipFile
+import org.apache.commons.compress.archivers.zip.Zip64Mode
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream
@@ -45,7 +46,7 @@ object ArchiveEngine {
 
     fun canCreate(format: ArchiveFormat) = format != ArchiveFormat.RAR
 
-    fun canEncrypt(format: ArchiveFormat) = format == ArchiveFormat.ZIP || format == ArchiveFormat.SEVEN_Z
+    fun canEncrypt(format: ArchiveFormat) = format == ArchiveFormat.SEVEN_Z
 
     fun list(file: File): List<ArchiveEntryInfo> {
         return when (detect(file)) {
@@ -67,10 +68,9 @@ object ArchiveEngine {
             ArchiveFormat.TAR, ArchiveFormat.TAR_GZ, ArchiveFormat.TAR_XZ, ArchiveFormat.TAR_BZ2 ->
                 tarStream(file).use { tin ->
                     val out = mutableListOf<ArchiveEntryInfo>()
-                    var e: TarArchiveEntry? = tin.nextEntry
-                    while (e != null) {
-                        out += ArchiveEntryInfo(e.name, e.isDirectory, e.size, e.size, e.modTime.time)
-                        e = tin.nextEntry
+                    while (true) {
+                        val entry = tin.nextTarEntry ?: break
+                        out += ArchiveEntryInfo(entry.name, entry.isDirectory, entry.size, entry.size, entry.modTime.time)
                     }
                     out
                 }
@@ -83,32 +83,31 @@ object ArchiveEngine {
         when (detect(archive)) {
             ArchiveFormat.ZIP -> {
                 if (password != null) {
-                    error("Password-protected ZIP extract is not supported by this ZipFile build; use 7z")
+                    error("Password-protected ZIP extract is not supported; use 7z")
                 }
                 ZipFile.builder().setFile(archive).setUseUnicodeExtraFields(true).get().use { z ->
-                z.entries.toList().forEach { e ->
-                    val target = PathSecurity.resolveSafe(destDir, e.name)
-                    if (e.isDirectory) target.mkdirs()
-                    else {
-                        target.parentFile?.mkdirs()
-                        z.getInputStream(e).use { ins -> target.outputStream().use { ins.copyTo(it) } }
+                    z.entries.toList().forEach { zipEntry ->
+                        val target = PathSecurity.resolveSafe(destDir, zipEntry.name)
+                        if (zipEntry.isDirectory) target.mkdirs()
+                        else {
+                            target.parentFile?.mkdirs()
+                            z.getInputStream(zipEntry).use { ins -> target.outputStream().use { ins.copyTo(it) } }
+                        }
                     }
-                }
                 }
             }
             ArchiveFormat.SEVEN_Z -> {
                 val b = SevenZFile.builder().setFile(archive)
                 if (password != null) b.setPassword(password)
                 b.get().use { z ->
-                    var e: SevenZArchiveEntry? = z.nextEntry
-                    while (e != null) {
-                        val target = PathSecurity.resolveSafe(destDir, e.name)
-                        if (e.isDirectory) target.mkdirs()
+                    while (true) {
+                        val sevenEntry: SevenZArchiveEntry = z.nextEntry ?: break
+                        val target = PathSecurity.resolveSafe(destDir, sevenEntry.name)
+                        if (sevenEntry.isDirectory) target.mkdirs()
                         else {
                             target.parentFile?.mkdirs()
-                            target.outputStream().use { z.getInputStream(e).copyTo(it) }
+                            target.outputStream().use { z.getInputStream(sevenEntry).copyTo(it) }
                         }
-                        e = z.nextEntry
                     }
                 }
             }
@@ -124,15 +123,14 @@ object ArchiveEngine {
             }
             ArchiveFormat.TAR, ArchiveFormat.TAR_GZ, ArchiveFormat.TAR_XZ, ArchiveFormat.TAR_BZ2 ->
                 tarStream(archive).use { tin ->
-                    var e: TarArchiveEntry? = tin.nextEntry
-                    while (e != null) {
-                        val target = PathSecurity.resolveSafe(destDir, e.name)
-                        if (e.isDirectory) target.mkdirs()
+                    while (true) {
+                        val entry = tin.nextTarEntry ?: break
+                        val target = PathSecurity.resolveSafe(destDir, entry.name)
+                        if (entry.isDirectory) target.mkdirs()
                         else {
                             target.parentFile?.mkdirs()
                             target.outputStream().use { tin.copyTo(it) }
                         }
-                        e = tin.nextEntry
                     }
                 }
             ArchiveFormat.GZ -> singleDecompress(destDir, archive, GzipCompressorInputStream(archive.inputStream()))
@@ -143,12 +141,12 @@ object ArchiveEngine {
     }
 
     fun createZip(sources: List<File>, dest: File, level: Int = Deflater.DEFAULT_COMPRESSION, password: CharArray? = null) {
+        if (password != null) {
+            error("Password-protected ZIP creation is not supported; use 7z")
+        }
         ZipArchiveOutputStream(dest).use { zos ->
             zos.setLevel(level.coerceIn(0, 9))
-            zos.setUseZip64(org.apache.commons.compress.archivers.zip.Zip64Mode.AsNeeded)
-            if (password != null) {
-                error("Password-protected ZIP creation is not supported; use 7z or extract-only ZIP passwords")
-            }
+            zos.setUseZip64(Zip64Mode.AsNeeded)
             sources.forEach { addZip(zos, it, it.name) }
         }
     }
@@ -183,13 +181,13 @@ object ArchiveEngine {
 
     private fun addZip(zos: ZipArchiveOutputStream, file: File, name: String) {
         if (file.isDirectory) {
-            val e = ZipArchiveEntry(if (name.endsWith("/")) name else "$name/")
-            zos.putArchiveEntry(e)
+            val zipEntry = ZipArchiveEntry(if (name.endsWith("/")) name else "$name/")
+            zos.putArchiveEntry(zipEntry)
             zos.closeArchiveEntry()
             file.listFiles()?.forEach { addZip(zos, it, "$name/${it.name}") }
         } else {
-            val e = ZipArchiveEntry(file, name)
-            zos.putArchiveEntry(e)
+            val zipEntry = ZipArchiveEntry(file, name)
+            zos.putArchiveEntry(zipEntry)
             file.inputStream().use { it.copyTo(zos) }
             zos.closeArchiveEntry()
         }
@@ -197,13 +195,13 @@ object ArchiveEngine {
 
     private fun add7z(out: SevenZOutputFile, file: File, name: String) {
         if (file.isDirectory) {
-            val e = out.createArchiveEntry(file, if (name.endsWith("/")) name else "$name/")
-            out.putArchiveEntry(e)
+            val sevenEntry = out.createArchiveEntry(file, if (name.endsWith("/")) name else "$name/")
+            out.putArchiveEntry(sevenEntry)
             out.closeArchiveEntry()
             file.listFiles()?.forEach { add7z(out, it, "$name/${it.name}") }
         } else {
-            val e = out.createArchiveEntry(file, name)
-            out.putArchiveEntry(e)
+            val sevenEntry = out.createArchiveEntry(file, name)
+            out.putArchiveEntry(sevenEntry)
             val buf = ByteArray(64 * 1024)
             file.inputStream().use { ins ->
                 while (true) {
@@ -218,13 +216,13 @@ object ArchiveEngine {
 
     private fun addTar(tos: TarArchiveOutputStream, file: File, name: String) {
         if (file.isDirectory) {
-            val e = TarArchiveEntry(file, "$name/")
-            tos.putArchiveEntry(e)
+            val tarEntry = TarArchiveEntry(file, "$name/")
+            tos.putArchiveEntry(tarEntry)
             tos.closeArchiveEntry()
             file.listFiles()?.forEach { addTar(tos, it, "$name/${it.name}") }
         } else {
-            val e = TarArchiveEntry(file, name)
-            tos.putArchiveEntry(e)
+            val tarEntry = TarArchiveEntry(file, name)
+            tos.putArchiveEntry(tarEntry)
             file.inputStream().use { it.copyTo(tos) }
             tos.closeArchiveEntry()
         }
