@@ -81,8 +81,10 @@ object ArchiveEngine {
     fun extractAll(archive: File, destDir: File, password: CharArray? = null) {
         destDir.mkdirs()
         when (detect(archive)) {
-            ArchiveFormat.ZIP -> ZipFile.builder().setFile(archive).setUseUnicodeExtraFields(true).get().use { z ->
-                if (password != null) z.setPassword(password)
+            ArchiveFormat.ZIP -> {
+                val zb = ZipFile.builder().setFile(archive).setUseUnicodeExtraFields(true)
+                if (password != null) zb.setPassword(password)
+                zb.get().use { z ->
                 z.entries.toList().forEach { e ->
                     val target = PathSecurity.resolveSafe(destDir, e.name)
                     if (e.isDirectory) target.mkdirs()
@@ -90,6 +92,7 @@ object ArchiveEngine {
                         target.parentFile?.mkdirs()
                         z.getInputStream(e).use { ins -> target.outputStream().use { ins.copyTo(it) } }
                     }
+                }
                 }
             }
             ArchiveFormat.SEVEN_Z -> {
@@ -141,9 +144,9 @@ object ArchiveEngine {
     fun createZip(sources: List<File>, dest: File, level: Int = Deflater.DEFAULT_COMPRESSION, password: CharArray? = null) {
         ZipArchiveOutputStream(dest).use { zos ->
             zos.setLevel(level.coerceIn(0, 9))
+            zos.setUseZip64(org.apache.commons.compress.archivers.zip.Zip64Mode.AsNeeded)
             if (password != null) {
-                zos.setPassword(password)
-                zos.setUseZip64(org.apache.commons.compress.archivers.zip.Zip64Mode.AsNeeded)
+                error("Password-protected ZIP creation is not supported; use 7z or extract-only ZIP passwords")
             }
             sources.forEach { addZip(zos, it, it.name) }
         }
